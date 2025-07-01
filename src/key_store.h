@@ -127,4 +127,14 @@ error_code_t keystore_clear(keystore_t *store);
  */
 error_code_t keystore_verify_integrity(const keystore_t *store);
 
+/**
+ * Load PEM file into memory (helper function)
+ * 
+ * @param filename PEM file path
+ * @param buffer Output buffer
+ * @param size Buffer size (in), actual size (out)
+ * @return Error code
+ */
+error_code_t keystore_load_pem_file(const char *filename, uint8_t *buffer, size_t *size);
+
 #endif /* SRC_KEY_STORE_H */
