@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential python3-pip
+        pip3 install cryptography
+    
+    - name: Build mbedTLS
+      run: |
+        cd third_party/mbedtls
+        make lib SHARED=0
+        cd ../..
+    
+    - name: Generate certificates
+      run: |
+        cd tools
+        python3 gen_cert.py --generate-test-certs
+        cd ..
+    
+    - name: Configure
+      run: |
+        mkdir build
+        cd build
+        cmake .. -DSTATIC_BUILD=ON -DWITH_TLS=ON -DENABLE_TESTS=ON
+    
+    - name: Build
+      run: |
+        cd build
+        make -j$(nproc)
+    
+    - name: Run tests
+      run: |
+        cd build
+        ctest --output-on-failure
+    
+    - name: Run static analysis
+      run: |
+        sudo apt-get install -y cppcheck
+        cppcheck --enable=all --error-exitcode=1 --suppress=missingIncludeSystem src/
+
+  build-macos:
+    runs-on: macos-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+    
+    - name: Install dependencies
+      run: |
+        brew install cmake
+        pip3 install cryptography
+    
+    - name: Build mbedTLS
+      run: |
+        cd third_party/mbedtls
+        make lib SHARED=0
+        cd ../..
+    
+    - name: Generate certificates
+      run: |
+        cd tools
+        python3 gen_cert.py --generate-test-certs
+        cd ..
+    
+    - name: Configure
+      run: |
+        mkdir build
+        cd build
+        cmake .. -DSTATIC_BUILD=ON -DWITH_TLS=ON -DENABLE_TESTS=ON
+    
+    - name: Build
+      run: |
+        cd build
+        make -j$(sysctl -n hw.ncpu)
+    
+    - name: Run tests
+      run: |
+        cd build
+        ctest --output-on-failure
+
+  code-quality:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Check formatting
+      run: |
+        # Check for tabs
+        ! grep -r $'\t' src/ --include="*.c" --include="*.h"
+        
+        # Check for trailing whitespace
+        ! grep -r '[[:space:]]$' src/ --include="*.c" --include="*.h"
+    
+    - name: Run clang-tidy
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang-tidy
+        find src -name "*.c" -o -name "*.h" | xargs clang-tidy \
+          -checks='-*,bugprone-*,cert-*,clang-analyzer-*,performance-*,portability-*,readability-*' \
+          --warnings-as-errors='*' -- -Isrc
