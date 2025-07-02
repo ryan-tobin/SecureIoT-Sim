@@ -7,21 +7,23 @@
  * Author: Ryan Tobin
  * Date: 2025
  */
+#define _POSIX_C_SOURCE 200809L /* for usleep */
 
- #include <stdio.h>
- #include <stdlib.h>
- #include <string.h>
- #include <signal.h>
- #include <unistd.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <signal.h>
+#include <unistd.h>
+#include <time.h>
 
- #include "config.h"
- #include "error.h"
- #include "tls_client.h"
- #include "key_store.h"
- #include "msg_protocol.h"
+#include "config.h"
+#include "error.h"
+#include "tls_client.h"
+#include "key_store.h"
+#include "msg_protocol.h"
 
  /* Global state for signal handling */
- static volatile int g_shutdown = 0;
+static volatile int g_shutdown = 0;
 
  /**
   * Signal handler for graceful shutdown
@@ -98,6 +100,17 @@ static void create_telemetry_data(telemetry_data_t *telemetry)
     telemetry->pressure = 1013.25f + ((rand() % 100) - 50) / 10.0f;
     telemetry->battery_mv = 3000 + (rand() % 600);
     telemetry->uptime_sec = uptime++;
+}
+
+/**
+ * Sleep for milliseconds 
+ */
+static void sleep_ms(int milliseconds)
+{
+    struct timespec ts;
+    ts.tv_sec = milliseconds / 1000;
+    ts.tv_nsec = (milliseconds % 1000) * 1000000;
+    nanosleep(&ts, NULL);
 }
 
  /**
@@ -210,7 +223,7 @@ int main(int argc, char *argv[])
     }
 
     /* Connect to server */
-    fprintf("Connecting to %s:%d...\n", server, port);
+    printf("Connecting to %s:%d...\n", server, port);
     ret = tls_client_connect(tls_ctx);
     if (ret != ERR_OK) {
         fprintf(stderr, "Failed to connect: %s\n", error_to_string(ret));
@@ -265,12 +278,12 @@ int main(int argc, char *argv[])
         while (received == 0 && timeout_count < 50 && !g_shutdown) {
             ret = tls_client_recv(tls_ctx, recv_buffer, sizeof(recv_buffer) - 1, &received);
             if (ret != ERR_OK) {
-                fprintf(stderr, "Failed to receive response: $s\n", error_to_string(ret));
+                fprintf(stderr, "Failed to receive response: %s\n", error_to_string(ret));
                 break;
             }
 
             if (received == 0) {
-                usleep(100000);
+                sleep_ms(100);
                 timeout_count++;
             }
         }
@@ -292,7 +305,7 @@ int main(int argc, char *argv[])
 
         /* wait before next telemetry */
         for (int i = 0; i < 50 && !g_shutdown; i++) {
-            usleep(100000);
+            sleep_ms(100);
         }
     }
 

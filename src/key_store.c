@@ -219,7 +219,7 @@ error_code_t keystore_add_entry(keystore_t *store, uint32_t id,
             store->entries[i].id = id;
             store->entries[i].type = type;
             store->entries[i].size = (uint32_t)size;
-            memcpy(store->entries[i].data, data. size);
+            memcpy(store->entries[i].data, data, size);
 
             store->entries[i].checksum = calculate_crc32(data,size);
             
@@ -260,7 +260,7 @@ error_code_t keystore_get_entry(const keystore_t *store, uint32_t id,
             }
 
             /* Verify checksum */
-            uint32 checksum = calculate_crc32(store->entries[i].data, store->entries[i].size);
+            uint32_t checksum = calculate_crc32(store->entries[i].data, store->entries[i].size);
             if (checksum != store->entries[i].checksum) {
                 return ERR_KEYSTORE_NOT_FOUND; /* Data corrupted */
             }
@@ -351,7 +351,7 @@ error_code_t keystore_verify_integrity(const keystore_t *store)
             uint32_t checksum = calculate_crc32(store->entries[i].data, store->entries[i].size);
 
             if (checksum != store->entries[i].checksum) {
-                return ERR_KEYSTORE_NOT_FOUND /* Corrupted entry */
+                return ERR_KEYSTORE_NOT_FOUND; /* Corrupted entry */
             }
             valid_entries++;
         }

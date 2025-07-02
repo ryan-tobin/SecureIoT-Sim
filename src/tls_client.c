@@ -45,6 +45,7 @@ struct tls_context {
     int connected;
 };
 
+#ifdef DEBUG
 /**
  * Debug callback for mbedTLS
  */
@@ -54,6 +55,7 @@ static void tls_debug_callback(void *ctx, int level, const char *file, int line,
     (void)level;
     DEBUG_PRINT("[mbedTLS] %s:%d: %s", file, line, str);
 }
+#endif
 
 /**
  * Initialize TLS client context
@@ -133,7 +135,9 @@ error_code_t tls_client_configure(tls_context_t *ctx, const tls_config_t *config
 
     /* Load client priv key */
     if (config->client_key != NULL && config->client_key_len > 0) {
-        ret = mbedtls_pk_parse_key(&ctx->pkey, config->client_key, config->client_key_len, NULL, 0);
+        ret = mbedtls_pk_parse_key(&ctx->pkey, config->client_key,
+                                   config->client_key_len, NULL, 0,
+                                   mbedtls_ctr_drbg_random, &ctx->ctr_drbg);
 
         if (ret != 0) {
             DEBUG_PRINT("mbedtls_pk_parse_key failed: -0x%04x", -ret);
@@ -158,7 +162,7 @@ error_code_t tls_client_configure(tls_context_t *ctx, const tls_config_t *config
         mbedtls_ssl_conf_authmode(&ctx->conf, MBEDTLS_SSL_VERIFY_NONE);
     }
 
-    mebdtls_ssl_conf_ca_chain(&ctx->conf, &ctx->cacert, NULL);
+    mbedtls_ssl_conf_ca_chain(&ctx->conf, &ctx->cacert, NULL);
     mbedtls_ssl_conf_rng(&ctx->conf, mbedtls_ctr_drbg_random, &ctx->ctr_drbg);
 
     /* Set client certificate if provided */
@@ -326,7 +330,10 @@ error_code_t tls_client_recv(tls_context_t *ctx, uint8_t *buffer,
         return ERR_OK;
     } else {
         DEBUG_PRINT("mbedtls_ssl_read failed: -0x%04x", -ret);
+        return ERR_TLS_READ;
     }
+
+    return ERR_OK;
 }
 
 /**

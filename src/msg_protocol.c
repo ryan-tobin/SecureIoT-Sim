@@ -138,7 +138,7 @@ static const char* find_json_field(const char *json, const char *field)
     }
 
     /* Find the colon */
-    pos = strchr(pos, ":");
+    pos = strchr(pos, ':');
     if (pos == NULL) {
         return NULL;
     }
@@ -209,7 +209,7 @@ static int extract_json_float(const char *json, const char *field, float *output
     }
 
     char *endptr;
-    float num - strtof(value, &endptr);
+    float num = strtof(value, &endptr);
     if (endptr == value) {
         return -1;
     }
@@ -264,26 +264,27 @@ error_code_t msg_parse_json(const char *json, size_t json_len,
 
         /* extract command fields */
         command_data_t *command = &message->data.command;
-        extract_json_number(json, "id", &command->command.id);
+        extract_json_number(json, "id", &command->command_id);
         extract_json_string(json, "command", command->command, sizeof(command->command));
         extract_json_string(json, "params", command->params, sizeof(command->params));
     }
     else if (strcmp(type_str, "response") == 0) {
         message->type = MSG_TYPE_RESPONSE;
-
-        /* extract response field */
+        
         response_data_t *response = &message->data.response;
-        extract_json_number(json, "reqeust_id", &response->response.id);
-
+        extract_json_number(json, "request_id", &response->request_id);
+        
         int32_t status;
         if (extract_json_number(json, "status", (uint32_t*)&status) == 0) {
             response->status_code = status;
         }
-
-        extract_json_string(json, "message", response->message, sizeof(response->message));
+        
+        extract_json_string(json, "message", response->message, 
+                           sizeof(response->message));
     }
+
     else if (strcmp(type_str, "error") == 0) {
-        message->type MSG_TYPE_ERROR
+        message->type = MSG_TYPE_ERROR;
     }
     else {
         return ERR_MSG_INVALID_FORMAT;
