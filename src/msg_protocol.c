@@ -12,6 +12,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <ctype.h>
+#include <stdarg.h>
 
 #include "msg_protocol.h"
 #include "config.h"
@@ -70,9 +72,24 @@ error_code_t msg_format_command(const command_data_t *command,
     CHECK_PARAM(buffer);
     CHECK_PARAM(written);
     
-    /* TODO: Implement command formatting */
-    
-    return ERR_NOT_IMPLEMENTED;
+    int ret = snprintf(buffer, buffer_size,
+        "{"
+        "\"type\":\"command\","
+        "\"id\":%u,"
+        "\"command\":\"%s\","
+        "\"params\":\"%s\""
+        "}",
+        command->command_id,
+        command->command,
+        command->params
+    );
+
+    if (ret < 0 || (size_t)ret >= buffer_size) {
+        return ERR_BUFFER_TOO_SMALL;
+    }
+
+    *written = (size_t)ret;
+    return ERR_OK;
 }
 
 /**
@@ -86,10 +103,121 @@ error_code_t msg_format_response(const response_data_t *response,
     CHECK_PARAM(buffer);
     CHECK_PARAM(written);
     
-    /* TODO: Implement response formatting */
+    int ret = snprintf(buffer, buffer_size,
+        "{"
+        "\"type\":\"response\","
+        "\"request_id\":%u,"
+        "\"status\":%d,"
+        "\"message\":\"%s\""
+        "}",
+        response->request_id,
+        response->status_code,
+        response->message
+    );
+
+    if (ret < 0 || (size_t)ret >= buffer_size) {
+        return ERR_BUFFER_TOO_SMALL;
+    }
     
+    *written = (size_t)ret;
     return ERR_NOT_IMPLEMENTED;
 }
+
+/**
+ * Find a JSON field in a string
+ * Returns pointer to the value after the colon, or NULL if not fund
+ */
+static const char* find_json_field(const char *json, const char *field)
+{
+    char search_pattern[128];
+    snprintf(search_pattern, sizeof(search_pattern), "\%s\"", field);
+
+    const char *pos = strstr(json, search_pattern);
+    if (pos == NULL) {
+        return NULL;
+    }
+
+    /* Find the colon */
+    pos = strchr(pos, ":");
+    if (pos == NULL) {
+        return NULL;
+    }
+
+    /* Skip colon and whitespace */
+    pos++;
+    while (*pos && isspace(*pos)) {
+        pos++;
+    }
+
+    return pos;
+}
+
+/**
+ * Extract a string value from JSON
+ * Returns 0 on sucess, -1 on error
+ */
+static int extract_json_string(const char *json, const char *field, char *output, size_t max_len)
+{
+    const char *value = find_json_field(json, field);
+    if (value == NULL || *value != '"') {
+        return -1;
+    }
+
+    /* skip opening quote */
+    value++;
+
+    /* copy until closing quote */
+    size_t i = 0;
+    while (*value && *value != '"' && i < max_len - 1) {
+        output[i++] = *value++;
+    }
+    output[i] = '\0';
+
+    return (*value == '"') ? 0 : -1;
+}
+
+/**
+ * Extract a number value from JSON
+ * Returns 0 on sucess, -1 on error
+ */
+static int extract_json_number(const char *json, const char *field, uint32_t *output)
+{
+    const char *value = find_json_field(json, field);
+    if (value == NULL) {
+        return -1;
+    }
+
+    char *endptr;
+    unsigned long num = strtoul(value, &endptr, 10);
+    if (endptr == value) {
+        return -1;
+    }
+
+    *output = (uint32_t)num;
+    return 0;
+}
+
+/**
+ * Extract a float value from JSON
+ * Returns 0 on success, -1 on error
+ */
+static int extract_json_float(const char *json, const char *field, float *output)
+{
+    const char *value = find_json_field(json,field);
+    if (value == NULL) {
+        return -1;
+    }
+
+    char *endptr;
+    float num - strtof(value, &endptr);
+    if (endptr == value) {
+        return -1;
+    }
+
+    *output = num;
+    return 0;
+}
+
 
 /**
  * Parse JSON message
@@ -100,10 +228,71 @@ error_code_t msg_parse_json(const char *json, size_t json_len,
     CHECK_PARAM(json);
     CHECK_PARAM(message);
     
-    /* TODO: Implement JSON parsing */
-    /* Note: In production, use a proper JSON parser */
+    (void)json_len; 
+
+    /* clear output */
+    memset(message, 0, sizeof(message_t));
+
+    /* extract message type */
+    char type_str[32];
+    if (extract_json_string(json, "type", type_str, sizeof(type_str)) != 0) {
+        return ERR_MSG_INVALID_FORMAT;
+    }
+
+    /* determine msg type */
+    if (strcmp(type_str, "telemetry") == 0) {
+        message->type = MSG_TYPE_TELEMETRY;
+
+        telemetry_data_t *telemetry = &message->data.telemetry;
+
+        if (extract_json_number(json, "timestamp", &telemetry->timestamp) != 0) {
+            telemetry->timestamp = msg_get_timestamp();
+        }
+
+        /* look for nested data object */
+        const char *data_obj = find_json_field(json, "data");
+        if (data_obj != NULL) {
+            extract_json_float(data_obj, "temperature", &telemetry->temperature);
+            extract_json_float(data_obj, "humidity", &telemetry->humidity);
+            extract_json_float(data_obj, "pressure", &telemetry->pressure);
+            extract_json_number(data_obj, "battery_mv", &telemetry->battery_mv);
+            extract_json_number(data_obj, "uptime_sec", &telemetry->uptime_sec);
+        }
+    }
+    else if (strcmp(type_str, "command") == 0) {
+        message->type = MSG_TYPE_COMMAND;
+
+        /* extract command fields */
+        command_data_t *command = &message->data.command;
+        extract_json_number(json, "id", &command->command.id);
+        extract_json_string(json, "command", command->command, sizeof(command->command));
+        extract_json_string(json, "params", command->params, sizeof(command->params));
+    }
+    else if (strcmp(type_str, "response") == 0) {
+        message->type = MSG_TYPE_RESPONSE;
+
+        /* extract response field */
+        response_data_t *response = &message->data.response;
+        extract_json_number(json, "reqeust_id", &response->response.id);
+
+        int32_t status;
+        if (extract_json_number(json, "status", (uint32_t*)&status) == 0) {
+            response->status_code = status;
+        }
+
+        extract_json_string(json, "message", response->message, sizeof(response->message));
+    }
+    else if (strcmp(type_str, "error") == 0) {
+        message->type MSG_TYPE_ERROR
+    }
+    else {
+        return ERR_MSG_INVALID_FORMAT;
+    }
+
+    /* extract common fields */
+    extract_json_number(json, "id", &message->msg_id);
     
-    return ERR_NOT_IMPLEMENTED;
+    return ERR_OK;
 }
 
 /**
@@ -118,7 +307,35 @@ error_code_t msg_validate(const message_t *message)
         return ERR_MSG_INVALID_FORMAT;
     }
     
-    /* TODO: Add more validation */
+    /* validate based on type */
+    switch (message->type) {
+        case MSG_TYPE_TELEMETRY:
+            if (message->data.telemetry.temperature < -100.0f || message->data.telemetry.temperature > 100.0f) {
+                return ERR_MSG_INVALID_FORMAT;
+            }
+            if (message->data.telemetry.humidity < 0.0f || message->data.telemetry.humidity > 100.0f) {
+                return ERR_MSG_INVALID_FORMAT;
+            }
+            break;
+        
+        case MSG_TYPE_COMMAND:
+            if (strlen(message->data.command.command) == 0) {
+                return ERR_MSG_INVALID_FORMAT;
+            }
+            break;
+
+        case MSG_TYPE_RESPONSE:
+            if (strlen(message->data.response.message) == 0) {
+                return ERR_MSG_INVALID_FORMAT;
+            }
+            break;
+
+        case MSG_TYPE_ERROR:
+            break;
+
+        default:
+            return ERR_MSG_INVALID_FORMAT;
+    }
     
     return ERR_OK;
 }
